@@ -36,13 +36,27 @@ from mos4d.utils.cache import get_cache, memoize
 
 
 def collate_fn(batch):
-    # Returns tensor of [batch, x, y, z, t, label]
-    tensor_batch = None
-    for i, past_point_clouds in enumerate(batch):
+    # Returns tensor of [batch, x, y, z, t, label] and sensor indices tensor
+
+    sensor_name_to_int = {
+        "Ouster": 0,
+        "Velodyne": 1,
+        "Aeva": 2,
+        "Avia": 3,
+    }
+
+    tensor_batch, sequence_batch = None, None
+    for i, (past_point_clouds, sequence) in enumerate(batch):
         ones = torch.ones(len(past_point_clouds), 1).type_as(past_point_clouds)
         tensor = torch.hstack([i * ones, past_point_clouds])
         tensor_batch = tensor if tensor_batch is None else torch.vstack([tensor_batch, tensor])
-    return tensor_batch
+
+        # 센서 이름을 정수로 변환하고 점 개수만큼 반복
+        sensor_int = sensor_name_to_int.get(sequence, 0)  # 기본값 0
+        sensor_tensor = torch.full((len(past_point_clouds),), sensor_int, dtype=torch.long)
+        sequence_batch = sensor_tensor if sequence_batch is None else torch.cat([sequence_batch, sensor_tensor])
+
+    return tensor_batch, sequence_batch
 
 
 class MOS4DDataModule(LightningDataModule):
@@ -64,12 +78,9 @@ class MOS4DDataModule(LightningDataModule):
         pass
 
     def setup(self, stage=None):
-        train_set = MOS4DDataset(
-            self.dataloader, self.data_dir, self.config, self.config.training.train, self.cache_dir
-        )
-        val_set = MOS4DDataset(
-            self.dataloader, self.data_dir, self.config, self.config.training.val, self.cache_dir
-        )
+        train_set = MOS4DDataset(self.dataloader, self.data_dir, self.config, self.config.training.train, self.cache_dir)
+        val_set = MOS4DDataset(self.dataloader, self.data_dir, self.config, self.config.training.val, self.cache_dir)
+
         self.train_loader = DataLoader(
             dataset=train_set,
             batch_size=self.config.training.batch_size,
@@ -98,9 +109,7 @@ class MOS4DDataModule(LightningDataModule):
 
         self.valid_iter = iter(self.valid_loader)
 
-        print(
-            "Loaded {:d} training and {:d} validation samples.".format(len(train_set), len(val_set))
-        )
+        print("Loaded {:d} training and {:d} validation samples.".format(len(train_set), len(val_set)))
 
     def train_dataloader(self):
         return self.train_loader
@@ -157,13 +166,14 @@ class MOS4DDataset(Dataset):
 
     def __getitem__(self, idx):
         sequence, scan_index = self.idx_mapper[idx]
-        return self.get_past_point_clouds(
+        batch = self.get_past_point_clouds(
             sequence,
             scan_index,
             self.config.mos.delay_mos,
             dict(self.config.data),
             dict(self.config.odometry),
         )
+        return batch, sequence.split("/")[0]  # ex. Tensor, single sensor name
 
     @memoize()
     def get_past_point_clouds(
@@ -209,9 +219,7 @@ class MOS4DDataset(Dataset):
             past_points = past_points[valid_mask]
 
             past_pose = self.poses[-(index + 1)]
-            past_points_transformed = self.odometry.transform(
-                past_points, np.linalg.inv(self.odometry.last_pose) @ past_pose
-            )
+            past_points_transformed = self.odometry.transform(past_points, np.linalg.inv(self.odometry.last_pose) @ past_pose)
 
             list_past_points.append(
                 np.hstack(

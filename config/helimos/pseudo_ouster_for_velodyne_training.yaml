@@ -1,0 +1,12 @@
+training:
+  id: "helimos_pseudo_ouster_for_velodyne"
+  train:
+    - "Ouster/train.txt"
+  val:
+    - "Ouster/val.txt"
+
+
+# Ouster : Super-Dense, 128, 360(circular pattern), 고용량
+# Velodyne : Sparse, 16, 360(circular pattern), 저용량
+# Aeva : Dense, null, wide(circular pattern), 고용량
+# Avia(Livox) : Dense, null, narrow(flower pattern), 저용량

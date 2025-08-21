@@ -10,37 +10,39 @@ import torch
 import torch.nn as nn
 from pytorch_lightning import LightningModule
 
-from mos4d.minkunet import CustomMinkUNet14
+from mos4d.minkunet import CustomMinkUNet14, shprint
 
 
 class MOS4DNet(LightningModule):
-    def __init__(self, voxel_size):
+    def __init__(self, voxel_size, is_student):
         super().__init__()
         self.voxel_size = voxel_size
         self.MinkUNet = CustomMinkUNet14(in_channels=1, out_channels=3, D=4)
         self.softmax = nn.Softmax(dim=1)
+        self.is_student = is_student
 
     def predict(self, past_point_clouds: torch.Tensor):
-        coordinates = torch.hstack(
-            [torch.zeros(len(past_point_clouds), 1).type_as(past_point_clouds), past_point_clouds]
-        )
-        logits = self.forward(coordinates)
-        return self.to_single_logit(logits)
+        coordinates = torch.hstack([torch.zeros(len(past_point_clouds), 1).type_as(past_point_clouds), past_point_clouds])
+        logits = self.forward(coordinates)["logits"]
+        return coordinates, self.to_single_logit(logits)
 
     def forward(self, coordinates: torch.Tensor):
-        quantization = torch.Tensor(
-            [1.0, self.voxel_size, self.voxel_size, self.voxel_size, 1.0]
-        ).type_as(coordinates)
+        quantization = torch.Tensor([1.0, self.voxel_size, self.voxel_size, self.voxel_size, 1.0]).type_as(coordinates)
         coordinates = torch.div(coordinates, quantization)
         features = 0.5 * torch.ones(len(coordinates), 1).type_as(coordinates)
 
         tensor_field = ME.TensorField(features=features, coordinates=coordinates.type_as(features))
         sparse_tensor = tensor_field.sparse()
 
-        predicted_sparse_tensor = self.MinkUNet(sparse_tensor)
+        predicted_sparse_tensor, bottleneck = self.MinkUNet(sparse_tensor)
         out = predicted_sparse_tensor.slice(tensor_field)
         out.features[:, 0] = -float("inf")
-        return out.features
+
+        rtn_json = dict()
+        rtn_json["logits"] = out.features
+        rtn_json["bottleneck"] = bottleneck.features
+
+        return rtn_json
 
     def to_single_logit(self, logits: torch.Tensor):
         softmax = self.softmax(logits)

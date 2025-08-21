@@ -53,11 +53,7 @@ class HeliMOSDataset:
 
         # Filter based on split if desired
         getIndex = lambda filename: int(os.path.basename(filename).split(".label")[0])
-        self.dict_label_files = {
-            getIndex(filename): filename
-            for filename in label_files
-            if getIndex(filename) in label_indices
-        }
+        self.dict_label_files = {getIndex(filename): filename for filename in label_files if getIndex(filename) in label_indices}
 
     def __getitem__(self, idx):
         points = self.scans(idx)
@@ -96,9 +92,7 @@ class HeliMOSDataset:
 
         poses = np.loadtxt(poses_file, delimiter=" ")
         n = poses.shape[0]
-        poses = np.concatenate(
-            (poses, np.zeros((n, 3), dtype=np.float32), np.ones((n, 1), dtype=np.float32)), axis=1
-        )
+        poses = np.concatenate((poses, np.zeros((n, 3), dtype=np.float32), np.ones((n, 1), dtype=np.float32)), axis=1)
         poses = poses.reshape((n, 4, 4))  # [N, 4, 4]
 
         # Ensure rotations are SO3

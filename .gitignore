@@ -1,5 +1,4 @@
 # Project related
-results/
 .polyscope.ini
 imgui.ini
 
@@ -55,6 +54,7 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+models/
 
 # Translations
 *.mo

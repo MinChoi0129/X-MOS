@@ -20,6 +20,7 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
+from pathlib import Path
 from typing import List
 
 from pydantic import BaseModel, Field
@@ -62,12 +63,64 @@ class TrainingConfig(BaseModel):
             "10",
         ]
     )
+
+    #######################################################
     val: List[str] = Field(default_factory=lambda: ["08"])
     batch_size: int = 16
+    # batch_size: int = 1  # Debugging
     accumulate_grad_batches: int = 1
-    max_epochs: int = 100
+    max_epochs: int = 60
     lr: float = 0.0001
     lr_epoch: int = 1
     lr_decay: float = 0.99
     weight_decay: float = 0.0001
     num_workers: int = 4
+    #######################################################
+    lambda_ce: float = 0.3
+    lambda_kd: float = 0.7
+    # lambda_mos: float = 0.4
+    temperature: float = 3.0
+    #######################################################
+    # Distillation chain control
+    # Example: [128, 64, 32, 16] and stage_index=0 -> 128->64, 1 -> 64->32, 2 -> 32->16
+    distill_chain: List[int] = [128, 64, 32, 16]
+    distill_stage_index: int = 2
+    # Beam-down behavior
+    beam_within_band_keep: float = 0.5
+    beam_kmeans_iters: int = 10
+    #######################################################
+    keep_training: bool = True
+    keep_training_weights: Path = (
+        "/home/work/4DMOS/models/4DMOS/helimos_pseudo_ouster_for_velodyne/case018/checkpoints/helimos_pseudo_ouster_for_velodyne_epoch=054_val_moving_iou=0.485.ckpt"
+    )
+    #######################################################
+    is_distill_mode: bool = True
+    O_teacher_weights: Path = (
+        "/home/work/4DMOS/models/4DMOS/helimos_ouster/case002/checkpoints/helimos_ouster_epoch=043_val_moving_iou=0.786.ckpt"
+    )
+    A_teacher_weights: Path = (
+        "/home/work/4DMOS/models/4DMOS/helimos_aeva/case001/checkpoints/helimos_aeva_epoch=058_val_moving_iou=0.813.ckpt"
+    )
+    V_teacher_weights: Path = (
+        "/home/work/4DMOS/models/4DMOS/helimos_velodyne/case019/checkpoints/helimos_velodyne_epoch=017_val_moving_iou=0.644.ckpt"
+    )
+    L_teacher_weights: Path = (
+        "/home/work/4DMOS/models/4DMOS/helimos_avia/case013/checkpoints/helimos_avia_epoch=034_val_moving_iou=0.853.ckpt"
+    )
+    #######################################################
+
+
+"""
+O_teacher_weights: Path = (
+    "/home/work/4DMOS/models/4DMOS/helimos_ouster/case002/checkpoints/helimos_ouster_epoch=043_val_moving_iou=0.786.ckpt"
+)
+A_teacher_weights: Path = (
+    "/home/work/4DMOS/models/4DMOS/helimos_aeva/case001/checkpoints/helimos_aeva_epoch=058_val_moving_iou=0.813.ckpt"
+)
+V_teacher_weights: Path = (
+    "/home/work/4DMOS/models/4DMOS/helimos_velodyne/case019/checkpoints/helimos_velodyne_epoch=017_val_moving_iou=0.644.ckpt"
+)
+L_teacher_weights: Path = (
+    "/home/work/4DMOS/models/4DMOS/helimos_avia/case013/checkpoints/helimos_avia_epoch=034_val_moving_iou=0.853.ckpt"
+)
+"""

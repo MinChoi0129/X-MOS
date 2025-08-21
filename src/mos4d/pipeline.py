@@ -33,6 +33,7 @@ from tqdm.auto import trange
 
 from mos4d.config import load_config
 from mos4d.metrics import get_confusion_matrix
+from mos4d.minkunet import shprint
 from mos4d.mos4d import MOS4DNet
 from mos4d.odometry import Odometry
 from mos4d.utils.pipeline_results import MOSPipelineResults
@@ -58,9 +59,7 @@ class MOS4DPipeline(OdometryPipeline):
         jump: int = 0,
     ):
         self._dataset = dataset
-        self._n_scans = (
-            len(self._dataset) - jump if n_scans == -1 else min(len(self._dataset) - jump, n_scans)
-        )
+        self._n_scans = len(self._dataset) - jump if n_scans == -1 else min(len(self._dataset) - jump, n_scans)
         self._first = jump
         self._last = self._first + self._n_scans
 
@@ -69,13 +68,13 @@ class MOS4DPipeline(OdometryPipeline):
         self.results_dir = None
 
         # Pipeline
-        state_dict = {
-            k.replace("model.", ""): v for k, v in torch.load(weights)["state_dict"].items()
-        }
+        state_dict = {k.replace("model.", ""): v for k, v in torch.load(weights)["state_dict"].items()}
         state_dict = {k.replace("mos.", ""): v for k, v in state_dict.items()}
         state_dict = {k: v for k, v in state_dict.items() if "MOSLoss" not in k}
+        state_dict = {k: v for k, v in state_dict.items() if not k.startswith("_teacher.")}
+        state_dict = {k: v for k, v in state_dict.items() if not k.startswith(("q_projection", "k_projection"))}
 
-        self.model = MOS4DNet(self.config.mos.voxel_size_mos)
+        self.model = MOS4DNet(self.config.mos.voxel_size_mos, is_student=True)
         self.model.load_state_dict(state_dict)
         self.model.cuda().eval().freeze()
 
@@ -91,9 +90,7 @@ class MOS4DPipeline(OdometryPipeline):
         self.gt_poses = self._dataset.gt_poses[self._first : self._last] if self.has_gt else None
         self.dataset_name = self._dataset.__class__.__name__
         self.dataset_sequence = (
-            self._dataset.sequence_id
-            if hasattr(self._dataset, "sequence_id")
-            else os.path.basename(self._dataset.data_dir)
+            self._dataset.sequence_id if hasattr(self._dataset, "sequence_id") else os.path.basename(self._dataset.data_dir)
         )
         self.config.out_dir += f"/4dmos/{self.dataset_sequence}"
 
@@ -144,15 +141,32 @@ class MOS4DPipeline(OdometryPipeline):
                 torch.hstack(
                     [
                         scan_points,
-                        scan_index
-                        * torch.ones(len(scan_points)).reshape(-1, 1).type_as(scan_points),
+                        scan_index * torch.ones(len(scan_points)).reshape(-1, 1).type_as(scan_points),
                     ]
                 )
             )
 
             past_point_clouds = torch.vstack(list(self.buffer))
             start_time = time.perf_counter_ns()
-            pred_logits = self.model.predict(past_point_clouds)
+            coordinates, pred_logits = self.model.predict(past_point_clouds)
+
+            # debug = True
+            # if debug:
+            #     import copy
+            #     # save as npy
+            #     coord_np = coordinates.cpu().numpy().astype(np.float64)[:, 1:4] # (N, 3)
+            #     logit_np = pred_logits.cpu().numpy().astype(np.float64) # (N, )
+
+            #     labels = copy.deepcopy(logit_np)
+            #     mask = logit_np > 0
+            #     labels[mask] = 1.0
+            #     labels[~mask] = 0.0
+
+            #     print(coord_np.shape, labels.shape)
+            #     concated_np = np.concatenate([coord_np, labels.reshape(-1, 1)], axis=1)
+            #     save_path = f"/home/work/4DMOS/npys/{scan_index:06d}.npy"
+            #     np.save(save_path, concated_np)
+
             self.times_mos[scan_index - self._first] = time.perf_counter_ns() - start_time
 
             # Detach, move to CPU

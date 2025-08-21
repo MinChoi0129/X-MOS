@@ -26,6 +26,18 @@ import MinkowskiEngine as ME
 import torch.nn as nn
 
 
+def shprint(*obj):
+    n = len(obj)
+    print("" * n)
+    for o in obj:
+        try:
+            print(o.shape, end=" | ")
+        except:
+            print(o, end=" | ")
+    print()
+    print("" * n)
+
+
 class BasicBlock(nn.Module):
     def __init__(
         self,
@@ -246,62 +258,64 @@ class CustomMinkUNet14(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def forward(self, x):
-        out = self.conv0p1s1(x)
-        out = self.bn0(out)
-        out_p1 = self.relu(out)
+    def forward(self, x):  # [79580, 1]
+        out = self.conv0p1s1(x)  # [79580, 8]
+        out = self.bn0(out)  # [79580, 8]
+        out_p1 = self.relu(out)  # [79580, 8]
 
-        out = self.conv1p1s2(out_p1)
-        out = self.bn1(out)
-        out = self.relu(out)
-        out_b1p2 = self.block1(out)
+        out = self.conv1p1s2(out_p1)  # [54244, 8]
+        out = self.bn1(out)  # [54244, 8]
+        out = self.relu(out)  # [54244, 8]
+        out_b1p2 = self.block1(out)  # [54244, 8]
 
-        out = self.conv2p2s2(out_b1p2)
-        out = self.bn2(out)
-        out = self.relu(out)
-        out_b2p4 = self.block2(out)
+        out = self.conv2p2s2(out_b1p2)  # [28096, 8]
+        out = self.bn2(out)  # [28096, 8]
+        out = self.relu(out)  # [28096, 8]
+        out_b2p4 = self.block2(out)  # [28096, 16]
 
-        out = self.conv3p4s2(out_b2p4)
-        out = self.bn3(out)
-        out = self.relu(out)
-        out_b3p8 = self.block3(out)
+        out = self.conv3p4s2(out_b2p4)  # [12082, 16]
+        out = self.bn3(out)  # [12082, 16]
+        out = self.relu(out)  # [12082, 16]
+        out_b3p8 = self.block3(out)  # [12082, 32]
 
         # tensor_stride=16
-        out = self.conv4p8s2(out_b3p8)
-        out = self.bn4(out)
-        out = self.relu(out)
-        out = self.block4(out)
+        out = self.conv4p8s2(out_b3p8)  # [4446, 32]
+        out = self.bn4(out)  # [4446, 32]
+        out = self.relu(out)  # [4446, 32]
+        bottleneck = self.block4(out)  # [4446, 64]
 
         # tensor_stride=8
-        out = self.convtr4p16s2(out)
-        out = self.bntr4(out)
-        out = self.relu(out)
+        out = self.convtr4p16s2(bottleneck)  # [12082, 64]
+        out = self.bntr4(out)  # [12082, 64]
+        out = self.relu(out)  # [12082, 64]
 
-        out = ME.cat(out, out_b3p8)
-        out = self.block5(out)
+        out = ME.cat(out, out_b3p8)  # [12082, 96]
+        out = self.block5(out)  # [12082, 64]
 
         # tensor_stride=4
-        out = self.convtr5p8s2(out)
-        out = self.bntr5(out)
-        out = self.relu(out)
+        out = self.convtr5p8s2(out)  # [28096, 32]
+        out = self.bntr5(out)  # [28096, 32]
+        out = self.relu(out)  # [28096, 32]
 
-        out = ME.cat(out, out_b2p4)
-        out = self.block6(out)
+        out = ME.cat(out, out_b2p4)  # [28096, 48]
+        out = self.block6(out)  # [28096, 32]
 
         # tensor_stride=2
-        out = self.convtr6p4s2(out)
-        out = self.bntr6(out)
-        out = self.relu(out)
+        out = self.convtr6p4s2(out)  # [54244, 16]
+        out = self.bntr6(out)  # [54244, 16]
+        out = self.relu(out)  # [54244, 16]
 
-        out = ME.cat(out, out_b1p2)
-        out = self.block7(out)
+        out = ME.cat(out, out_b1p2)  # [54244, 24]
+        out = self.block7(out)  # [54244, 16]
 
         # tensor_stride=1
-        out = self.convtr7p2s2(out)
-        out = self.bntr7(out)
-        out = self.relu(out)
+        out = self.convtr7p2s2(out)  # [79580, 8]
+        out = self.bntr7(out)  # [79580, 8]
+        out = self.relu(out)  # [79580, 8]
 
-        out = ME.cat(out, out_p1)
-        out = self.block8(out)
+        out = ME.cat(out, out_p1)  # [79580, 16]
+        out = self.block8(out)  # [79580, 8]
 
-        return self.final(out)
+        out = self.final(out)  # [79580, 3]
+
+        return out, bottleneck
