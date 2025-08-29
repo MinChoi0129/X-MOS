@@ -150,23 +150,6 @@ class MOS4DPipeline(OdometryPipeline):
             start_time = time.perf_counter_ns()
             coordinates, pred_logits = self.model.predict(past_point_clouds)
 
-            # debug = True
-            # if debug:
-            #     import copy
-            #     # save as npy
-            #     coord_np = coordinates.cpu().numpy().astype(np.float64)[:, 1:4] # (N, 3)
-            #     logit_np = pred_logits.cpu().numpy().astype(np.float64) # (N, )
-
-            #     labels = copy.deepcopy(logit_np)
-            #     mask = logit_np > 0
-            #     labels[mask] = 1.0
-            #     labels[~mask] = 0.0
-
-            #     print(coord_np.shape, labels.shape)
-            #     concated_np = np.concatenate([coord_np, labels.reshape(-1, 1)], axis=1)
-            #     save_path = f"/home/work/4DMOS/npys/{scan_index:06d}.npy"
-            #     np.save(save_path, concated_np)
-
             self.times_mos[scan_index - self._first] = time.perf_counter_ns() - start_time
 
             # Detach, move to CPU
@@ -235,3 +218,5 @@ class MOS4DPipeline(OdometryPipeline):
         self.results.eval_mos(self.confusion_matrix_online, desc="Online Prediction")
         self.results.eval_mos(self.confusion_matrix_receding, desc="Receding Horizon Strategy")
         self.results.eval_fps(self.times_mos, desc="Average Frequency 4DMOS")
+
+        print(f"Finished: {self.dataset_sequence}")

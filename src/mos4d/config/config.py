@@ -69,7 +69,7 @@ class TrainingConfig(BaseModel):
     batch_size: int = 16
     # batch_size: int = 1  # Debugging
     accumulate_grad_batches: int = 1
-    max_epochs: int = 60
+    max_epochs: int = 100
     lr: float = 0.0001
     lr_epoch: int = 1
     lr_decay: float = 0.99
@@ -89,18 +89,14 @@ class TrainingConfig(BaseModel):
     beam_within_band_keep: float = 0.5
     beam_kmeans_iters: int = 10
     #######################################################
-    keep_training: bool = True
+    keep_training: bool = False
     keep_training_weights: Path = (
         "/home/work/4DMOS/models/4DMOS/helimos_pseudo_ouster_for_velodyne/case018/checkpoints/helimos_pseudo_ouster_for_velodyne_epoch=054_val_moving_iou=0.485.ckpt"
     )
     #######################################################
-    is_distill_mode: bool = True
-    O_teacher_weights: Path = (
-        "/home/work/4DMOS/models/4DMOS/helimos_ouster/case002/checkpoints/helimos_ouster_epoch=043_val_moving_iou=0.786.ckpt"
-    )
-    A_teacher_weights: Path = (
-        "/home/work/4DMOS/models/4DMOS/helimos_aeva/case001/checkpoints/helimos_aeva_epoch=058_val_moving_iou=0.813.ckpt"
-    )
+    is_distill_mode: bool = False
+    O_teacher_weights: Path = ""
+    A_teacher_weights: Path = ""
     V_teacher_weights: Path = (
         "/home/work/4DMOS/models/4DMOS/helimos_velodyne/case019/checkpoints/helimos_velodyne_epoch=017_val_moving_iou=0.644.ckpt"
     )

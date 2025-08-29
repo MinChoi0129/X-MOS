@@ -47,11 +47,12 @@ class TrainingModule(LightningModule):
         self.lr_decay = config.training.lr_decay
         self.weight_decay = config.training.weight_decay
         self.voxel_size = config.mos.voxel_size_mos
-
-        self.is_distill_mode = config.training.is_distill_mode
         self.mos = MOS4DNet(self.voxel_size, is_student=True)
-        # 여러 teacher 모델을 이름으로 저장하여 덮어쓰기 방지
-        self.teachers = {}
+
+        self._config_id = dict(config)["training"].id
+        self._is_distill_mode = config.training.is_distill_mode
+        self._ce_loss = torch.nn.CrossEntropyLoss()
+        self._lambda_ce = config.training.lambda_ce
 
         if config.training.keep_training:
             state_dict = {
@@ -59,15 +60,14 @@ class TrainingModule(LightningModule):
             }
             state_dict = {k.replace("mos.", ""): v for k, v in state_dict.items()}
             state_dict = {k: v for k, v in state_dict.items() if "MOSLoss" not in k}
+            state_dict = {k: v for k, v in state_dict.items() if not k.startswith(("q_projection", "k_projection"))}
             self.mos.load_state_dict(state_dict)
             self.mos.cuda()
-            print("이어서 학습을 진행합니다.")
+            print("이어서 학습을 진행합니다. :", config.training.keep_training_weights)
 
-        self.ce_loss = torch.nn.CrossEntropyLoss()
-        self._lambda_ce = config.training.lambda_ce
-
-        if self.is_distill_mode:
+        if self._is_distill_mode:
             # Distillation chain config
+            self._teachers = {}
             self._distill_chain = list(config.training.distill_chain)
             self._distill_stage_index = int(config.training.distill_stage_index)
             self._beam_within_band_keep = float(config.training.beam_within_band_keep)
@@ -115,7 +115,7 @@ class TrainingModule(LightningModule):
         for param in teacher_model.parameters():
             param.requires_grad = False
         # 이름으로 보관(등록하지 않아 state_dict 저장에서 제외됨)
-        self.teachers[teacher_name] = teacher_model
+        self._teachers[teacher_name] = teacher_model
 
         print(f"**Teacher {teacher_name} loaded: {weights}**")
 
@@ -125,9 +125,97 @@ class TrainingModule(LightningModule):
     def val_reset(self):
         self.val_confusion_matrix = torch.zeros(2, 2)
 
+    def attention_based_kd_loss(self, teacher_outputs, student_logits_for_kd, student_bottleneck):
+        # 1. Query (Student) 및 Keys (Teachers) 준비
+        # bottleneck feature들의 전역 평균을 대표 벡터로 사용
+        q_feature = torch.mean(student_bottleneck, dim=0, keepdim=True)  # (1, 64)
+
+        teacher_keys = []
+        teacher_values = []
+        for sensor_name, (t_logits, t_bottleneck_features) in teacher_outputs.items():
+            k_feature = torch.mean(t_bottleneck_features, dim=0, keepdim=True)  # (1, 64)
+            teacher_keys.append(k_feature)
+            teacher_values.append(t_logits)
+
+        # (num_teachers, 1, 64) -> (num_teachers, 64)
+        teacher_keys_tensor = torch.stack(teacher_keys).squeeze(1)
+
+        # 2. Q, K를 학습 가능한 레이어에 투영
+        q_proj = self.q_projection(q_feature)  # (1, attention_dim)
+        k_proj = self.k_projection(teacher_keys_tensor)  # (num_teachers, attention_dim)
+
+        # 3. 어텐션 스코어 및 가중치 계산
+        # 스케일링을 포함한 dot-product attention
+        attention_scores = torch.matmul(q_proj, k_proj.T) / (self.attention_dim**0.5)  # (1, num_teachers)
+        attention_weights = F.softmax(attention_scores, dim=-1)  # (1, num_teachers)
+
+        # 1. 로깅할 딕셔너리 생성
+        weights_dict = dict(zip(self._teachers.keys(), attention_weights.flatten().detach().cpu()))
+        # 2. TensorBoard/Wandb 등에서 그룹화를 위해 key 이름에 접두사 추가
+        logs_to_track = {f"attention_weight/{name}": weight for name, weight in weights_dict.items()}
+
+        # 3. self.log_dict()를 사용하여 한 번에 로깅
+        self.log_dict(logs_to_track, on_step=True)
+
+        # 4. 가중치를 이용해 Teacher Logits (Values) 융합
+        # (num_teachers, N, 2)
+        teacher_values_tensor = torch.stack(teacher_values)
+        # 가중치 브로드캐스팅을 위해 차원 변경: (1, num_teachers) -> (num_teachers, 1, 1)
+        attention_weights_reshaped = attention_weights.T.unsqueeze(-1)
+
+        # 가중합 계산
+        blended_logits = torch.sum(teacher_values_tensor * attention_weights_reshaped, dim=0)  # (N, 2)
+
+        # 5. KD Loss 계산
+        soft_teacher = F.softmax(blended_logits / self._temperature, dim=-1)
+        soft_student = F.log_softmax(student_logits_for_kd / self._temperature, dim=-1)
+        total_kd_loss = self._distill_loss(soft_student, soft_teacher) * (self._temperature**2)
+
+        return total_kd_loss
+
+    def sensor_aware_kd_loss(self, teacher_outputs, student_logits_for_kd, sequence):
+        # 교사 이름을 센서 인덱스로 매핑
+        teacher_to_sensor_idx = {"O": 0, "V": 1, "A": 2, "L": 3}
+
+        # 각 교사별로 센서별 KD 손실 계산
+        for teacher_name, (teacher_logits_for_kd, _) in teacher_outputs.items():
+            sensor_idx = teacher_to_sensor_idx[teacher_name]
+
+            # 센서별 마스킹
+            specialist_mask = sequence == sensor_idx
+            t, s = teacher_logits_for_kd[specialist_mask], student_logits_for_kd[specialist_mask]
+
+            # 전문 센서에 대한 KD 손실
+            if len(s) == 0:
+                specialist_kd_loss = torch.tensor(0.0, device=student_logits_for_kd.device)
+            else:
+                soft_student = F.log_softmax(s / self._temperature, dim=-1)
+                soft_teacher = F.softmax(t / self._temperature, dim=-1)
+                specialist_kd_loss = self._distill_loss(soft_student, soft_teacher) * (self._temperature**2)
+
+            total_kd_loss += specialist_kd_loss
+
+        total_kd_loss /= len(teacher_outputs)
+        return total_kd_loss
+
+    def average_based_kd_loss(self, teacher_outputs, student_logits_for_kd):
+        averaged_logits = None
+        for sensor_name, (teacher_logits_for_kd, _) in teacher_outputs.items():
+            if averaged_logits is None:
+                averaged_logits = teacher_logits_for_kd
+            else:
+                averaged_logits += teacher_logits_for_kd
+        averaged_logits /= len(teacher_outputs)
+
+        soft_teacher = F.softmax(averaged_logits / self._temperature, dim=-1)
+        soft_student = F.log_softmax(student_logits_for_kd / self._temperature, dim=-1)
+        total_kd_loss = self._distill_loss(soft_student, soft_teacher) * (self._temperature**2)
+        return total_kd_loss
+
     def training_step(self, batch: torch.Tensor, batch_idx, dataloader_index=0):
         batch, sequence = batch
 
+        ##############################################################################################
         # Skip step if too few moving points
         num_moving_points = len(batch[batch[:, -1] == 1.0])
         num_points = len(batch)
@@ -135,7 +223,9 @@ class TrainingModule(LightningModule):
             return None
 
         before_beam_down_batch, after_beam_down_batch, kept_indices = self.augmentation(
-            batch, is_pseudo_mode=False, is_train_data=True
+            batch,
+            is_pseudo_mode=False,
+            is_train_data=True,
         )
 
         if kept_indices is not None:
@@ -143,135 +233,44 @@ class TrainingModule(LightningModule):
 
         # Only train if enough points are left (after beam_down)
         if after_beam_down_batch is None or len(after_beam_down_batch) < 100:
-            # print("학습 데이터가 부족합니다.")
             return None
+        ##############################################################################################
 
         # Teacher: before beam-down, Student: after beam-down
-        teacher_coordinates = before_beam_down_batch[:, :5]
-        student_coordinates = after_beam_down_batch[:, :5]
-        gt_labels = after_beam_down_batch[:, -1]
+        teacher_coordinates, student_coordinates, gt_labels = (
+            before_beam_down_batch[:, :5],
+            after_beam_down_batch[:, :5],
+            after_beam_down_batch[:, -1],
+        )
 
         student_rtn = self.mos.forward(student_coordinates)
-        student_logits = student_rtn["logits"]  # (N, 3) -> 3 means unlabeled(filled with -inf), static, moving
-        student_bottleneck = student_rtn["bottleneck"]  # (n, 64) n < N -> 64 is the bottleneck dimension
+        student_logits, student_bottleneck = student_rtn["logits"], student_rtn["bottleneck"]  # (N, 3), (N, 64)
         gt_indices = (gt_labels + 1).to(torch.long)
 
         """ Cross Entropy Loss """
-        ce_loss = self.ce_loss(student_logits, gt_indices)
+        ce_loss = self._ce_loss(student_logits, gt_indices)
         self.log("train_ce_loss", ce_loss.item(), on_step=True)
 
         """ Distillation Loss """
-        if self.is_distill_mode:
+        if self._is_distill_mode:
             # In distillation, we have to use logits[:, 1:] because logits[:, 0] is filled with -inf
             student_logits_for_kd = student_logits[:, 1:]  # (N, 2) -> static, moving
             teacher_outputs = {}
             with torch.no_grad():
-                for sensor_name, teacher_model in self.teachers.items():
+                for sensor_name, teacher_model in self._teachers.items():
                     teacher_rtn = teacher_model.forward(teacher_coordinates)
                     t_logits = teacher_rtn["logits"][:, 1:]  # (N, 2)
-                    t_bottleneck = teacher_rtn["bottleneck"]  # SparseTensor
+                    t_bottleneck = teacher_rtn["bottleneck"]  # (N, 64)
                     teacher_outputs[sensor_name] = (t_logits, t_bottleneck)
 
-            # Compute attention weights from Q (student) and K (teachers)
-            total_kd_loss = torch.tensor(0.0, device=student_logits_for_kd.device)
-
-            """Attention-based KD"""
-            # # 1. Query (Student) 및 Keys (Teachers) 준비
-            # # bottleneck feature들의 전역 평균을 대표 벡터로 사용
-            # q_feature = torch.mean(student_bottleneck, dim=0, keepdim=True)  # (1, 64)
-
-            # teacher_keys = []
-            # teacher_values = []
-            # for sensor_name, (t_logits, t_bottleneck_features) in teacher_outputs.items():
-            #     k_feature = torch.mean(t_bottleneck_features, dim=0, keepdim=True)  # (1, 64)
-            #     teacher_keys.append(k_feature)
-            #     teacher_values.append(t_logits)
-
-            # # (num_teachers, 1, 64) -> (num_teachers, 64)
-            # teacher_keys_tensor = torch.stack(teacher_keys).squeeze(1)
-
-            # # 2. Q, K를 학습 가능한 레이어에 투영
-            # q_proj = self.q_projection(q_feature)  # (1, attention_dim)
-            # k_proj = self.k_projection(teacher_keys_tensor)  # (num_teachers, attention_dim)
-
-            # # 3. 어텐션 스코어 및 가중치 계산
-            # # 스케일링을 포함한 dot-product attention
-            # attention_scores = torch.matmul(q_proj, k_proj.T) / (self.attention_dim**0.5)  # (1, num_teachers)
-            # attention_weights = F.softmax(attention_scores, dim=-1)  # (1, num_teachers)
-
-            # # 1. 로깅할 딕셔너리 생성
-            # weights_dict = dict(zip(self.teachers.keys(), attention_weights.flatten().detach().cpu()))
-            # # 2. TensorBoard/Wandb 등에서 그룹화를 위해 key 이름에 접두사 추가
-            # logs_to_track = {f"attention_weight/{name}": weight for name, weight in weights_dict.items()}
-
-            # # 3. self.log_dict()를 사용하여 한 번에 로깅
-            # self.log_dict(logs_to_track, on_step=True)
-
-            # # 4. 가중치를 이용해 Teacher Logits (Values) 융합
-            # # (num_teachers, N, 2)
-            # teacher_values_tensor = torch.stack(teacher_values)
-            # # 가중치 브로드캐스팅을 위해 차원 변경: (1, num_teachers) -> (num_teachers, 1, 1)
-            # attention_weights_reshaped = attention_weights.T.unsqueeze(-1)
-
-            # # 가중합 계산
-            # blended_logits = torch.sum(teacher_values_tensor * attention_weights_reshaped, dim=0)  # (N, 2)
-
-            # # 5. KD Loss 계산
-            # soft_teacher = F.softmax(blended_logits / self._temperature, dim=-1)
-            # soft_student = F.log_softmax(student_logits_for_kd / self._temperature, dim=-1)
-            # total_kd_loss = self._distill_loss(soft_student, soft_teacher) * (self._temperature**2)
-
-            """Average Logits-based KD"""
-            # averaged_logits = None
-            # for sensor_name, (t_logits, t_bottleneck) in teacher_outputs.items():
-            #     if averaged_logits is None:
-            #         averaged_logits = t_logits
-            #     else:
-            #         averaged_logits += t_logits
-            # averaged_logits /= len(teacher_outputs)
-
-            # soft_teacher = F.softmax(averaged_logits / self._temperature, dim=-1)
-            # soft_student = F.log_softmax(student_logits_for_kd / self._temperature, dim=-1)
-            # total_kd_loss = self._distill_loss(soft_student, soft_teacher) * (self._temperature**2)
-
-            """ Sensor-aware KD """
-            # 교사 이름을 센서 인덱스로 매핑
-            teacher_to_sensor_idx = {"O": 0, "V": 1, "A": 2, "L": 3}
-
-            def compute_kd_loss(student_logits, teacher_logits, weight):
-                """KD 손실 계산 헬퍼 함수"""
-                if len(student_logits) == 0:
-                    return torch.tensor(0.0, device=student_logits.device)
-
-                soft_teacher = F.softmax(teacher_logits / self._temperature, dim=-1)
-                soft_student = F.log_softmax(student_logits / self._temperature, dim=-1)
-                return self._distill_loss(soft_student, soft_teacher) * (self._temperature**2) * weight
-
-            # 각 교사별로 센서별 KD 손실 계산
-            for teacher_name, (t_logits, t_bottleneck) in teacher_outputs.items():
-                sensor_idx = teacher_to_sensor_idx[teacher_name]
-
-                # 센서별 마스크 생성
-                specialist_mask = sequence == sensor_idx
-                # general_mask = sequence != sensor_idx
-
-                # 전문 센서에 대한 KD 손실
-                specialist_kd_loss = compute_kd_loss(
-                    student_logits_for_kd[specialist_mask],
-                    t_logits[specialist_mask],
-                    1.0,
-                )
-
-                total_kd_loss += specialist_kd_loss
-
-            total_kd_loss /= len(teacher_outputs)
-
-            kd_loss = total_kd_loss
+            """KD-Loss by version"""
+            # kd_loss = self.attention_based_kd_loss(teacher_outputs, student_logits_for_kd, student_bottleneck)
+            # kd_loss = self.average_based_kd_loss(teacher_outputs, student_logits_for_kd)
+            kd_loss = self.sensor_aware_kd_loss(teacher_outputs, student_logits_for_kd, sequence)
 
         """ Total Loss with Weights"""
         loss = self._lambda_ce * ce_loss
-
-        if self.is_distill_mode:
+        if self._is_distill_mode:
             loss += self._lambda_kd * kd_loss
             self.log("train_kd_loss", (self._lambda_kd * kd_loss).item(), on_step=True)
 
@@ -310,7 +309,7 @@ class TrainingModule(LightningModule):
         logits = student_rtn["logits"]
 
         gt_indices = (gt_labels + 1).to(torch.long)
-        loss = self.ce_loss(logits, gt_indices)
+        loss = self._ce_loss(logits, gt_indices)
 
         self.log("val_loss", loss.item(), batch_size=len(batch), prog_bar=True, on_epoch=True)
 
@@ -329,7 +328,7 @@ class TrainingModule(LightningModule):
         iou = get_iou(self.val_confusion_matrix)
         recall = get_recall(self.val_confusion_matrix)
         precision = get_precision(self.val_confusion_matrix)
-        print(f"[Validation] | IoU: {iou[1].item():.4f} | Recall: {recall[1].item():.4f} | Precision: {precision[1].item():.4f}")
+        print(f"[Running Validation : {self._config_id}] | IoU: {iou[1].item():.4f}")
         self.log("val_moving_iou", iou[1].item())
         self.log("val_moving_recall", recall[1].item())
         self.log("val_moving_precision", precision[1].item())
@@ -362,7 +361,6 @@ class TrainingModule(LightningModule):
         if not is_pseudo_mode:
             return batch, batch, final_indices if is_train_data else None
 
-        print("***!!!!!!!!!!!!!!!!!!!!!!!!!!***")
         # Build before/after according to chain stage
         chain = self._distill_chain
         stage = max(0, min(self._distill_stage_index, len(chain) - 2))

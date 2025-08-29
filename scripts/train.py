@@ -110,7 +110,6 @@ def train(
 
     # Train!
     trainer.fit(model, dataset)
-    # trainer.validate(model, dataset)
 
 
 if __name__ == "__main__":

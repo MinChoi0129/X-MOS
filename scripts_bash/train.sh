@@ -8,14 +8,5 @@ export CUDA_VISIBLE_DEVICES=0
 export OMP_NUM_THREADS=8
 
 
-MODE=all # config/helimos 참조
+MODE=velodyne # config/helimos 참조
 python3 scripts/train.py ${HELIMOS_PATH} helimos ${CACHE_PATH} --config config/helimos/${MODE}_training.yaml
-
-# MODE=only_test_ouster # config/helimos 참조
-# python3 scripts/train.py ${HELIMOS_PATH} helimos ${CACHE_PATH} --config config/helimos/${MODE}_training.yaml
-
-# MODE=only_test_avia # config/helimos 참조
-# python3 scripts/train.py ${HELIMOS_PATH} helimos ${CACHE_PATH} --config config/helimos/${MODE}_training.yaml
-
-# MODE=only_test_aeva # config/helimos 참조
-# python3 scripts/train.py ${HELIMOS_PATH} helimos ${CACHE_PATH} --config config/helimos/${MODE}_training.yaml
