@@ -176,7 +176,7 @@ class TrainingModule(LightningModule):
     def sensor_aware_kd_loss(self, teacher_outputs, student_logits_for_kd, sequence):
         # 교사 이름을 센서 인덱스로 매핑
         teacher_to_sensor_idx = {"O": 0, "V": 1, "A": 2, "L": 3}
-
+        total_kd_loss = torch.tensor(0.0, device=student_logits_for_kd.device)
         # 각 교사별로 센서별 KD 손실 계산
         for teacher_name, (teacher_logits_for_kd, _) in teacher_outputs.items():
             sensor_idx = teacher_to_sensor_idx[teacher_name]
@@ -214,7 +214,6 @@ class TrainingModule(LightningModule):
 
     def training_step(self, batch: torch.Tensor, batch_idx, dataloader_index=0):
         batch, sequence = batch
-
         ##############################################################################################
         # Skip step if too few moving points
         num_moving_points = len(batch[batch[:, -1] == 1.0])
@@ -301,7 +300,7 @@ class TrainingModule(LightningModule):
         if len(batch) < 100:
             return None
 
-        batch, _, _ = self.augmentation(batch, is_pseudo_mode=False, is_train_data=False)
+        _, batch, _ = self.augmentation(batch, is_pseudo_mode=False, is_train_data=False)
         coordinates = batch[:, :5].reshape(-1, 5)
         gt_labels = batch[:, -1].reshape(-1)
 
@@ -359,7 +358,10 @@ class TrainingModule(LightningModule):
             final_indices = torch.where(crop_mask)[0][subsample_mask]
 
         if not is_pseudo_mode:
-            return batch, batch, final_indices if is_train_data else None
+            if is_train_data:
+                return batch, batch, final_indices
+            else:
+                return batch, batch, None
 
         # Build before/after according to chain stage
         chain = self._distill_chain
@@ -400,7 +402,6 @@ class TrainingModule(LightningModule):
             within_band_keep=self._beam_within_band_keep,
             return_indices=True,
         )
-
         return before_batch, after_batch, kept
 
     def crop(self, batch):

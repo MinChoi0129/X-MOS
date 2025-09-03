@@ -108,8 +108,10 @@ def train(
         ],
     )
 
+    print("here")
     # Train!
-    trainer.fit(model, dataset)
+    # trainer.fit(model, dataset)
+    trainer.validate(model, dataset)
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ HELIMOS_PATH=/home/ssd_4tb/minjae/HeLiMOS
 CACHE_PATH=/home/ssd_4tb/minjae/HeLiMOS_cache
 
 export CUDA_VISIBLE_DEVICES=0
-export OMP_NUM_THREADS=8
+export OMP_NUM_THREADS=10
 
 
 MODE=velodyne # config/helimos 참조

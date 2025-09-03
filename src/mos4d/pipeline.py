@@ -32,7 +32,7 @@ from kiss_icp.pipeline import OdometryPipeline
 from tqdm.auto import trange
 
 from mos4d.config import load_config
-from mos4d.metrics import get_confusion_matrix
+from mos4d.metrics import get_confusion_matrix, get_iou
 from mos4d.minkunet import shprint
 from mos4d.mos4d import MOS4DNet
 from mos4d.odometry import Odometry
@@ -220,3 +220,4 @@ class MOS4DPipeline(OdometryPipeline):
         self.results.eval_fps(self.times_mos, desc="Average Frequency 4DMOS")
 
         print(f"Finished: {self.dataset_sequence}")
+        print("IoU: ", get_iou(self.confusion_matrix_receding))
