@@ -1,0 +1,7 @@
+# Case 004 (Livox Avia, L in the paper). Also the easy-to-learn teacher M_L.
+training:
+  id: "helimos_avia"
+  train:
+    - "Avia/train.txt"
+  val:
+    - "Avia/val.txt"

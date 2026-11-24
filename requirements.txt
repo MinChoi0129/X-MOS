@@ -1,0 +1,9 @@
+numpy<2
+pytorch_lightning==2.5.1
+kiss-icp==1.2.3
+diskcache
+pydantic>=2
+pydantic-settings
+pyyaml
+tqdm
+tensorboard

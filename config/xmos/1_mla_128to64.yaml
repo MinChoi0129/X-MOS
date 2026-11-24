@@ -1,0 +1,20 @@
+# Multi-level adaptive teacher generation, stage 128 -> 64 (Sec. III-B.2, Fig. 4)
+#
+# Teacher and student are roles within one stage: the student of a stage is the teacher of the
+# next one, so from the second stage on both of them see pseudo data.
+#   teacher: M_O (config/baseline/ouster.yaml), frozen, sees the original 128-beam scans
+#   student: starts from the same weights, sees pseudo 64-beam scans
+training:
+  id: "helimos_mla_128to64"
+  train:
+    - "Ouster/train.txt"
+  val:
+    - "Ouster/val.txt"
+  pseudo_beam_down: True
+  distill_chain: [128, 64, 32, 16]
+  distill_stage_index: 0
+  keep_training: True
+  keep_training_weights: "checkpoints/helimos_ouster.ckpt"
+  is_distill_mode: True
+  kd_mode: "sensor_aware"
+  O_teacher_weights: "checkpoints/helimos_ouster.ckpt"

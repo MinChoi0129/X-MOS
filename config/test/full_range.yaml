@@ -1,0 +1,4 @@
+# Evaluate all points instead of only those within 50 m of the sensor (default of 4DMOS for the
+# zero-shot datasets)
+mos:
+  max_range_mos: -1.0

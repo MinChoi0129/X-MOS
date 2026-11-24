@@ -1,0 +1,10 @@
+# Fine-tuning of M_P^16 on the real 16-beam Velodyne scans -> Velodyne expert teacher M_V^T
+# (Case 008)
+training:
+  id: "helimos_velodyne_teacher"
+  train:
+    - "Velodyne/train.txt"
+  val:
+    - "Velodyne/val.txt"
+  keep_training: True
+  keep_training_weights: "checkpoints/helimos_mla_32to16.ckpt"

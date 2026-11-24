@@ -1,0 +1,7 @@
+# Case 001. Also the easy-to-learn teacher M_O and the start of the multi-level adaptation.
+training:
+  id: "helimos_ouster"
+  train:
+    - "Ouster/train.txt"
+  val:
+    - "Ouster/val.txt"

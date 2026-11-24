@@ -1,0 +1,7 @@
+# Case 003. Also the easy-to-learn teacher M_A.
+training:
+  id: "helimos_aeva"
+  train:
+    - "Aeva/train.txt"
+  val:
+    - "Aeva/val.txt"

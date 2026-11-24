@@ -1,0 +1,21 @@
+# Multi-level adaptive teacher generation, stage 32 -> 16 (Sec. III-B.2, Fig. 4)
+#
+# Teacher and student are roles within one stage: the student of a stage is the teacher of the
+# next one, so from the second stage on both of them see pseudo data.
+#   teacher: the result of stage 2, frozen, sees pseudo 32-beam scans
+#   student: starts from the same weights, sees pseudo 16-beam scans
+# The result is M_P^16, the ready-to-learn pseudo model that initializes the final student.
+training:
+  id: "helimos_mla_32to16"
+  train:
+    - "Ouster/train.txt"
+  val:
+    - "Ouster/val.txt"
+  pseudo_beam_down: True
+  distill_chain: [128, 64, 32, 16]
+  distill_stage_index: 2
+  keep_training: True
+  keep_training_weights: "checkpoints/helimos_mla_64to32.ckpt"
+  is_distill_mode: True
+  kd_mode: "sensor_aware"
+  O_teacher_weights: "checkpoints/helimos_mla_64to32.ckpt"

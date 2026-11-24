@@ -1,0 +1,24 @@
+# Case 012: the logits of all teachers are averaged instead of the teacher activator
+training:
+  id: "helimos_xmos_student_average"
+  train:
+    - "Avia/train.txt"
+    - "Aeva/train.txt"
+    - "Velodyne/train.txt"
+    - "Ouster/train.txt"
+  val:
+    - "Avia/val.txt"
+    - "Aeva/val.txt"
+    - "Velodyne/val.txt"
+    - "Ouster/val.txt"
+  keep_training: True
+  keep_training_weights: "checkpoints/helimos_mla_32to16.ckpt"
+  is_distill_mode: True
+  kd_mode: "average"
+  lambda_ce: 0.3
+  lambda_kd: 0.7
+  temperature: 3.0
+  O_teacher_weights: "checkpoints/helimos_ouster.ckpt"
+  A_teacher_weights: "checkpoints/helimos_aeva.ckpt"
+  L_teacher_weights: "checkpoints/helimos_avia.ckpt"
+  V_teacher_weights: "checkpoints/helimos_velodyne_teacher.ckpt"

@@ -1,0 +1,7 @@
+# Case 002: Velodyne trained naively. The X-MOS teacher M_V is config/xmos/4_velodyne_teacher.yaml.
+training:
+  id: "helimos_velodyne"
+  train:
+    - "Velodyne/train.txt"
+  val:
+    - "Velodyne/val.txt"
