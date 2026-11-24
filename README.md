@@ -59,11 +59,12 @@ bash scripts/test_zero_shot.sh   # SemanticKITTI, Sipailou Campus, Apollo
 If you find our work useful in your research, please consider citing our paper:
 
 ```bibtex
-@inproceedings{lee2026xmos,
+@inproceedings{lee2026x,
+  title={X-MOS: A Heterogeneous Cross-LiDAR Generalization Framework for Moving Object Segmentation},
   author={Lee, Minjae and Ha, Ilhwan and Choi, Sang-Min and Kim, Gun-Woo and Lee, Suwon},
   booktitle={2026 IEEE International Conference on Robotics and Automation (ICRA)},
-  title={X-MOS: A Heterogeneous Cross-LiDAR Generalization Framework for Moving Object Segmentation},
+  pages={4818--4825},
   year={2026},
-  pages={4818-4825},
-  doi={10.1109/ICRA57385.2026.11696227}}
+  organization={IEEE}
+}
 ```
